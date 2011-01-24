@@ -1,4 +1,4 @@
-/*
+/**
  * Copyright 2010 Google Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -57,7 +57,7 @@ class JavascriptFilterTest : public ResourceManagerTestBase {
   }
 
   void InitTest(int64 ttl) {
-    InitResponseHeaders(kOrigJsName, kContentTypeJavascript, kJsData, ttl);
+    InitMetaData(kOrigJsName, kContentTypeJavascript, kJsData, ttl);
   }
 
   // Generate HTML loading 3 resources with the specified URLs
@@ -99,9 +99,9 @@ TEST_F(JavascriptFilterTest, ServeFiles) {
   // When we start, there are no mock fetchers, so we'll need to get it
   // from the cache or the disk.  Start with the cache.
   file_system_.Disable();
-  ResponseHeaders headers;
+  SimpleMetaData headers;
   resource_manager_->SetDefaultHeaders(&kContentTypeJavascript, &headers);
-  http_cache_.Put(expected_rewritten_path_, &headers, kJsMinData,
+  http_cache_.Put(expected_rewritten_path_, headers, kJsMinData,
                   &message_handler_);
   EXPECT_EQ(0, lru_cache_->num_hits());
   ASSERT_TRUE(ServeResource(kSourcePrefix, kFilterId,

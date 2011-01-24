@@ -21,9 +21,8 @@
       'dependencies': [
         '../net/instaweb/instaweb.gyp:*',
         '../net/instaweb/instaweb_core.gyp:*',
-        '../net/instaweb/apache.gyp:*',
+        '../net/instaweb/instaweb_html_rewriter.gyp:*',
         '../net/instaweb/mod_pagespeed.gyp:*',
-        '../net/instaweb/test.gyp:*',
         'install.gyp:*',
       ],} ]
 }

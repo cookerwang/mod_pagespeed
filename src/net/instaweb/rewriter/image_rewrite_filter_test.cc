@@ -78,8 +78,7 @@ class ImageRewriteTest : public ResourceManagerTestBase {
                                       &message_handler_));
 
     // Also fetch the resource to ensure it can be created dynamically
-    RequestHeaders request_headers;
-    ResponseHeaders response_headers;
+    SimpleMetaData request_headers, response_headers;
     std::string fetched_resource_content;
     StringWriter writer(&fetched_resource_content);
     DummyCallback dummy_callback(true);
@@ -119,7 +118,7 @@ class ImageRewriteTest : public ResourceManagerTestBase {
 
     fetched_resource_content.clear();
     dummy_callback.Reset();
-    ResponseHeaders redirect_headers;
+    SimpleMetaData redirect_headers;
     other_rewrite_driver_.FetchResource(src_string, request_headers,
                                         &redirect_headers, &writer,
                                         &message_handler_, &dummy_callback);
@@ -140,7 +139,7 @@ class ImageRewriteTest : public ResourceManagerTestBase {
     // failed.
     message_handler_.Message(
         kInfo, "Now with serving, but with a recent fetch failure.");
-    ResponseHeaders other_headers;
+    SimpleMetaData other_headers;
     // size_t header_size = fetched_resource_content.size();
     dummy_callback.Reset();
 

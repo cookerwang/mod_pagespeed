@@ -1,4 +1,4 @@
-/*
+/**
  * Copyright 2010 Google Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -31,8 +31,8 @@
 #include "net/instaweb/util/public/content_type.h"
 #include "net/instaweb/util/public/google_url.h"
 #include "net/instaweb/util/public/hasher.h"
-#include "net/instaweb/http/public/http_cache.h"
-#include "net/instaweb/http/public/http_value.h"
+#include "net/instaweb/util/public/http_cache.h"
+#include "net/instaweb/util/public/http_value.h"
 #include "net/instaweb/util/public/message_handler.h"
 #include "net/instaweb/util/public/named_lock_manager.h"
 #include "net/instaweb/util/public/statistics.h"
@@ -53,7 +53,6 @@ const char kResourceUrlDomainRejections[] = "resource_url_domain_rejections";
 
 const int64 kGeneratedMaxAgeMs = Timer::kYearMs;
 const int64 kGeneratedMaxAgeSec = Timer::kYearMs / Timer::kSecondMs;
-const int64 kRefreshExpirePercent = 75;
 
 // Our HTTP cache mostly stores full URLs, including the http: prefix,
 // mapping them into the URL contents and HTTP headers.  However, we
@@ -72,11 +71,6 @@ const int64 kRefreshExpirePercent = 75;
 // TODO(jmarantz): inject the SVN version number here to automatically bust
 // caches whenever pagespeed is upgraded.
 const char kCacheKeyPrefix[] = "rname/";
-
-// In the case when we want to remember that it was not beneficial to produce
-// a certain resource we include this header in the metadata of the entry
-// in the above cache.
-const char kCacheUnoptimizableHeader[] = "X-ModPagespeed-Unoptimizable";
 
 }  // namespace
 
@@ -190,10 +184,10 @@ void ResourceManager::ValidateShardsAgainstUrlPrefixPattern() {
 }
 #endif
 
-// TODO(jmarantz): consider moving this method to ResponseHeaders
+// TODO(jmarantz): consider moving this method to MetaData
 void ResourceManager::SetDefaultHeaders(const ContentType* content_type,
-                                        ResponseHeaders* header) const {
-  CHECK(!header->has_major_version());
+                                        MetaData* header) const {
+  CHECK_EQ(0, header->major_version());
   CHECK_EQ(0, header->NumAttributes());
   header->set_major_version(1);
   header->set_minor_version(1);
@@ -239,9 +233,9 @@ void ResourceManager::SetDefaultHeaders(const ContentType* content_type,
   header->ComputeCaching();
 }
 
-// TODO(jmarantz): consider moving this method to ResponseHeaders
+// TODO(jmarantz): consider moving this method to MetaData
 void ResourceManager::SetContentType(const ContentType* content_type,
-                                     ResponseHeaders* header) {
+                                     MetaData* header) {
   CHECK(content_type != NULL);
   header->RemoveAll(HttpAttributes::kContentType);
   header->Add(HttpAttributes::kContentType, content_type->mime_type());
@@ -310,24 +304,19 @@ OutputResource* ResourceManager::CreateOutputResourceWithPath(
   // Determine whether this output resource is still valid by looking
   // up by hash in the http cache.  Note that this cache entry will
   // expire when any of the origin resources expire.
-  ResponseHeaders meta_data;
+  SimpleMetaData meta_data;
   StringPiece hash_extension;
   HTTPValue value;
   std::string name_key = StrCat(kCacheKeyPrefix, resource->name_key());
   if ((http_cache_->Find(name_key, &value, &meta_data, handler)
        == HTTPCache::kFound) &&
       value.ExtractContents(&hash_extension)) {
-    CharStarVector dummy;
-    if (meta_data.Lookup(kCacheUnoptimizableHeader, &dummy)) {
-      resource->set_optimizable(false);
-    } else {
-      ResourceNamer hash_ext;
-      if (hash_ext.DecodeHashExt(hash_extension)) {
-        resource->SetHash(hash_ext.hash());
-        // Note that the '.' must be included in the suffix
-        // TODO(jmarantz): remove this from the suffix.
-        resource->set_suffix(StrCat(".", hash_ext.ext()));
-      }
+    ResourceNamer hash_ext;
+    if (hash_ext.DecodeHashExt(hash_extension)) {
+      resource->SetHash(hash_ext.hash());
+      // Note that the '.' must be included in the suffix
+      // TODO(jmarantz): remove this from the suffix.
+      resource->set_suffix(StrCat(".", hash_ext.ext()));
     }
   }
   return resource;
@@ -380,7 +369,7 @@ Resource* ResourceManager::CreateInputResource(
     resource = CreateInputResourceUnchecked(*input_gurl, rewrite_options,
                                             handler);
   } else {
-    handler->Message(kInfo, "Invalid resource url '%s' relative to '%s'",
+    handler->Message(kInfo, "%s: Invalid url relative to '%s'",
                      input_url.as_string().c_str(), base_gurl.spec().c_str());
     IncrementResourceUrlDomainRejections();
     resource = NULL;
@@ -440,7 +429,7 @@ Resource* ResourceManager::CreateInputResourceUnchecked(
     // Note: Bad user-content can leave us here.  But it's really hard
     // to concatenate a valid protocol and domain onto an arbitrary string
     // and end up with an invalid GURL.
-    handler->Message(kWarning, "Invalid resource url '%s'",
+    handler->Message(kWarning, "%s: Invalid url",
                      url.possibly_invalid_spec().c_str());
     return NULL;
   }
@@ -477,7 +466,7 @@ Resource* ResourceManager::CreateInputResourceUnchecked(
 // It will also simplify this routine quite a bit.
 bool ResourceManager::FetchOutputResource(
     OutputResource* output_resource,
-    Writer* writer, ResponseHeaders* response_headers,
+    Writer* writer, MetaData* response_headers,
     MessageHandler* handler, BlockingBehavior blocking) const {
   if (output_resource == NULL) {
     return false;
@@ -493,7 +482,7 @@ bool ResourceManager::FetchOutputResource(
   // doing the StrCat inside.
   bool ret = false;
   StringPiece content;
-  ResponseHeaders* meta_data = output_resource->metadata();
+  MetaData* meta_data = output_resource->metadata();
   if (output_resource->IsWritten()) {
     ret = ((writer == NULL) ||
            ((output_resource->value_.ExtractContents(&content)) &&
@@ -515,7 +504,7 @@ bool ResourceManager::FetchOutputResource(
         ret = true;
       } else if (ReadIfCached(output_resource, handler)) {
         content = output_resource->contents();
-        http_cache_->Put(url, meta_data, content, handler);
+        http_cache_->Put(url, *meta_data, content, handler);
         ret = ((writer == NULL) || writer->Write(content, handler));
       }
       // On the first iteration, obtain the lock if we don't have data.
@@ -544,14 +533,10 @@ bool ResourceManager::Write(HttpStatus::Code status_code,
                             OutputResource* output,
                             int64 origin_expire_time_ms,
                             MessageHandler* handler) {
-  ResponseHeaders* meta_data = output->metadata();
+  MetaData* meta_data = output->metadata();
   SetDefaultHeaders(output->type(), meta_data);
   meta_data->SetStatusAndReason(status_code);
 
-  // The URL for any resource we will write includes the hash of contents,
-  // so it can can live, essentially, forever. So compute this hash,
-  // and cache the output using meta_data's default headers which are to cache
-  // forever.
   scoped_ptr<OutputResource::OutputWriter> writer(output->BeginWrite(handler));
   bool ret = (writer != NULL);
   if (ret) {
@@ -559,11 +544,40 @@ bool ResourceManager::Write(HttpStatus::Code status_code,
     ret &= output->EndWrite(writer.get(), handler);
     http_cache_->Put(output->url(), &output->value_, handler);
 
-    // If our URL is derived from some pre-existing URL (and not invented by
-    // us due to something like outlining), cache the mapping from original URL
-    // to the constructed one.
     if (!output->generated()) {
-      CacheComputedResourceMapping(output, origin_expire_time_ms, handler);
+      // Map the name of this resource to the fully expanded filename.  The
+      // name of the output resource is usually a function of how it is
+      // constructed from input resources.  For example, with combine_css,
+      // output->name() encodes all the component CSS filenames.  The filename
+      // this maps to includes the hash of the content.  Thus the two mappings
+      // have different lifetimes.
+      //
+      // The name->filename map expires when any of the origin files expire.
+      // When that occurs, fresh content must be read, and the output must
+      // be recomputed and re-hashed.
+      //
+      // However, the hashed output filename can live, essentially, forever.
+      // This is what we'll hash first as meta_data's default headers are
+      // to cache forever.
+
+      // Now we'll mutate meta_data to expire when the origin expires, and
+      // map the name to the hash.
+      int64 delta_ms = origin_expire_time_ms - http_cache_->timer()->NowMs();
+      int64 delta_sec = delta_ms / 1000;
+      if ((delta_sec > 0) || http_cache_->force_caching()) {
+        SimpleMetaData origin_meta_data;
+        SetDefaultHeaders(output->type(), &origin_meta_data);
+        std::string cache_control = StringPrintf(
+            "max-age=%ld",
+            static_cast<long>(delta_sec));  // NOLINT
+        origin_meta_data.RemoveAll(HttpAttributes::kCacheControl);
+        origin_meta_data.Add(HttpAttributes::kCacheControl, cache_control);
+        origin_meta_data.ComputeCaching();
+
+        std::string name_key = StrCat(kCacheKeyPrefix, output->name_key());
+        http_cache_->Put(name_key, origin_meta_data, output->hash_ext(),
+                         handler);
+      }
     }
   } else {
     // Note that we've already gotten a "could not open file" message;
@@ -573,88 +587,6 @@ bool ResourceManager::Write(HttpStatus::Code status_code,
                      file_prefix_.c_str());
   }
   return ret;
-}
-
-void ResourceManager::WriteUnoptimizable(OutputResource* output,
-                                         int64 origin_expire_time_ms,
-                                         MessageHandler* handler) {
-  output->set_optimizable(false);
-  CacheComputedResourceMapping(output, origin_expire_time_ms, handler);
-}
-
-// Map the name of this resource to information on its contents:
-// either the fully expanded filename, or the fact that we don't want
-// to make this resource (!optimizable()).
-//
-// The name of the output resource is usually a function of how it is
-// constructed from input resources.  For example, with combine_css,
-// output->name() encodes all the component CSS filenames.  The filename
-// this maps to includes the hash of the content.
-//
-// The name->filename map expires when any of the origin files expire.
-// When that occurs, fresh content must be read, and the output must
-// be recomputed and re-hashed. We'll hence mutate meta_data to expire when the
-// origin expires
-//
-// TODO(morlovich) We should consider caching based on the input hash, too,
-// so we don't end redoing work when input resources don't change but have
-// short expiration.
-void ResourceManager::CacheComputedResourceMapping(OutputResource* output,
-    int64 origin_expire_time_ms, MessageHandler* handler) {
-  int64 delta_ms = origin_expire_time_ms - http_cache_->timer()->NowMs();
-  int64 delta_sec = delta_ms / 1000;
-  if ((delta_sec > 0) || http_cache_->force_caching()) {
-    ResponseHeaders origin_meta_data;
-    SetDefaultHeaders(output->type(), &origin_meta_data);
-    std::string cache_control = StringPrintf(
-        "max-age=%ld",
-        static_cast<long>(delta_sec));  // NOLINT
-    origin_meta_data.RemoveAll(HttpAttributes::kCacheControl);
-    origin_meta_data.Add(HttpAttributes::kCacheControl, cache_control);
-    if (!output->optimizable()) {
-      origin_meta_data.Add(kCacheUnoptimizableHeader, "true");
-    }
-    origin_meta_data.ComputeCaching();
-
-    std::string name_key = StrCat(kCacheKeyPrefix, output->name_key());
-    std::string file_mapping;
-    if (output->optimizable()) {
-      file_mapping = output->hash_ext();
-    }
-    http_cache_->Put(name_key, &origin_meta_data, file_mapping, handler);
-  }
-}
-
-void ResourceManager::RefreshImminentlyExpiringResource(
-    Resource* resource, MessageHandler* handler) const {
-  // Consider a resource with 5 minute expiration time (the default
-  // assumed by mod_pagespeed when a potentialy cacheable resource
-  // lacks a cache control header, which happens a lot).  If the
-  // origin TTL was 5 minutes and 4 minutes have expired, then re-fetch
-  // it so that we can avoid expiring the data.
-  //
-  // If we don't do this, then every 5 minutes, someone will see
-  // this page unoptimized.  In a site with very low QPS, including
-  // test instances of a site, this can happen quite often.
-  if (!http_cache_->force_caching() && resource->IsCacheable()) {
-    int64 now_ms = timer()->NowMs();
-    const ResponseHeaders* headers = resource->metadata();
-    int64 start_date_ms = headers->timestamp_ms();
-    int64 expire_ms = headers->CacheExpirationTimeMs();
-    int64 ttl_ms = expire_ms - start_date_ms;
-
-    // Only proactively refresh resources that have at least our
-    // default expiration of 5 minutes.
-    //
-    // TODO(jmaessen): Lower threshold when If-Modified-Since checking is in
-    // place; consider making this settable.
-    if (ttl_ms >= ResponseHeaders::kImplicitCacheTtlMs) {
-      int64 elapsed_ms = now_ms - start_date_ms;
-      if ((elapsed_ms * 100) >= (kRefreshExpirePercent * ttl_ms)) {
-        resource->Freshen(handler);
-      }
-    }
-  }
 }
 
 void ResourceManager::ReadAsync(Resource* resource,
@@ -673,7 +605,6 @@ void ResourceManager::ReadAsync(Resource* resource,
 
   switch (result) {
     case HTTPCache::kFound:
-      RefreshImminentlyExpiringResource(resource, handler);
       callback->Done(true, resource);
       break;
     case HTTPCache::kRecentFetchFailedDoNotRefetch:
@@ -714,7 +645,6 @@ bool ResourceManager::ReadIfCached(Resource* resource,
   }
   if (result == HTTPCache::kFound) {
     resource->DetermineContentType();
-    RefreshImminentlyExpiringResource(resource, handler);
     return true;
   }
   return false;

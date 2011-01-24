@@ -1,4 +1,4 @@
-/*
+/**
  * Copyright 2010 Google Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -20,7 +20,6 @@
 #include "net/instaweb/rewriter/public/url_input_resource.h"
 
 #include "base/basictypes.h"
-#include "net/instaweb/http/public/request_headers.h"
 #include "net/instaweb/rewriter/public/domain_lawyer.h"
 #include "net/instaweb/rewriter/public/resource_manager.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
@@ -28,10 +27,10 @@
 #include "net/instaweb/util/public/file_system.h"
 #include "net/instaweb/util/public/google_url.h"
 #include "net/instaweb/util/public/hasher.h"
-#include "net/instaweb/http/public/http_value.h"
+#include "net/instaweb/util/public/http_value.h"
 #include "net/instaweb/util/public/message_handler.h"
 #include "net/instaweb/util/public/timer.h"
-#include "net/instaweb/http/public/url_async_fetcher.h"
+#include "net/instaweb/util/public/url_async_fetcher.h"
 
 namespace net_instaweb {
 
@@ -49,11 +48,9 @@ class UrlResourceFetchCallback : public UrlAsyncFetcher::Callback {
   virtual ~UrlResourceFetchCallback() {}
 
   void AddToCache(bool success) {
-    ResponseHeaders* meta_data = response_headers();
-    if (success && !meta_data->IsErrorStatus()
-        && !http_cache()->IsAlreadyExpired(*meta_data)) {
+    if (success) {
       HTTPValue* value = http_value();
-      value->SetHeaders(meta_data);
+      value->SetHeaders(*response_headers());
       http_cache()->Put(url(), value, message_handler_);
     } else {
       http_cache()->RememberNotCacheable(url(), message_handler_);
@@ -63,7 +60,7 @@ class UrlResourceFetchCallback : public UrlAsyncFetcher::Callback {
   bool Fetch(UrlAsyncFetcher* fetcher, MessageHandler* handler) {
     // TODO(jmarantz): consider request_headers.  E.g. will we ever
     // get different resources depending on user-agent?
-    RequestHeaders request_headers;
+    SimpleMetaData request_headers;
     message_handler_ = handler;
     std::string lock_name = StrCat(
         resource_manager_->filename_prefix(),
@@ -138,7 +135,7 @@ class UrlResourceFetchCallback : public UrlAsyncFetcher::Callback {
   // which must be live at the time it is called.  The ReadIfCached
   // cannot rely on the resource still being alive when the callback
   // is called, so it must keep them locally in the class.
-  virtual ResponseHeaders* response_headers() = 0;
+  virtual MetaData* response_headers() = 0;
   virtual HTTPValue* http_value() = 0;
   virtual std::string url() const = 0;
   virtual HTTPCache* http_cache() = 0;
@@ -175,7 +172,7 @@ class UrlReadIfCachedCallback : public UrlResourceFetchCallback {
   // thread, as it only populates the cache, which is thread-safe.
   virtual bool EnableThreaded() const { return true; }
 
-  virtual ResponseHeaders* response_headers() { return &response_headers_; }
+  virtual MetaData* response_headers() { return &response_headers_; }
   virtual HTTPValue* http_value() { return &http_value_; }
   virtual std::string url() const { return url_; }
   virtual HTTPCache* http_cache() { return http_cache_; }
@@ -185,7 +182,7 @@ class UrlReadIfCachedCallback : public UrlResourceFetchCallback {
   std::string url_;
   HTTPCache* http_cache_;
   HTTPValue http_value_;
-  ResponseHeaders response_headers_;
+  SimpleMetaData response_headers_;
 
   DISALLOW_COPY_AND_ASSIGN(UrlReadIfCachedCallback);
 };
@@ -200,9 +197,6 @@ bool UrlInputResource::Load(MessageHandler* handler) {
 
   // If the fetcher can satisfy the request instantly, then we
   // can try to populate the resource from the cache.
-  //
-  // TODO(jmarantz): populate directly from Fetch callback rather
-  // than having to deserialize from cache.
   bool data_available =
       (cb->Fetch(resource_manager_->url_async_fetcher(), handler) &&
        (http_cache->Find(url_, &value_, &meta_data_, handler) ==
@@ -225,7 +219,7 @@ class UrlReadAsyncFetchCallback : public UrlResourceFetchCallback {
     callback_->Done(success, resource_);
   }
 
-  virtual ResponseHeaders* response_headers() { return &resource_->meta_data_; }
+  virtual MetaData* response_headers() { return &resource_->meta_data_; }
   virtual HTTPValue* http_value() { return &resource_->value_; }
   virtual std::string url() const { return resource_->url(); }
   virtual HTTPCache* http_cache() {
@@ -251,11 +245,6 @@ void UrlInputResource::LoadAndCallback(AsyncCallback* callback,
         new UrlReadAsyncFetchCallback(callback, this);
     cb->Fetch(resource_manager_->url_async_fetcher(), message_handler);
   }
-}
-
-void UrlInputResource::Freshen(MessageHandler* handler) {
-  // TODO(jmarantz): use if-modified-since
-  Load(handler);
 }
 
 }  // namespace net_instaweb

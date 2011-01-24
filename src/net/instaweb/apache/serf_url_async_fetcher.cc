@@ -30,11 +30,10 @@
 #include "base/basictypes.h"
 #include "base/stl_util-inl.h"
 #include "net/instaweb/apache/apr_mutex.h"
-#include "net/instaweb/http/public/request_headers.h"
-#include "net/instaweb/http/public/response_headers.h"
-#include "net/instaweb/http/public/response_headers_parser.h"
 #include "net/instaweb/public/version.h"
 #include "net/instaweb/util/public/message_handler.h"
+#include "net/instaweb/util/public/meta_data.h"
+#include "net/instaweb/util/public/simple_meta_data.h"
 #include "net/instaweb/util/public/statistics.h"
 #include "net/instaweb/util/public/string_util.h"
 #include "net/instaweb/util/public/timer.h"
@@ -86,8 +85,8 @@ class SerfFetch {
   // TODO(lsong): make use of request_headers.
   SerfFetch(apr_pool_t* pool,
             const std::string& url,
-            const RequestHeaders& request_headers,
-            ResponseHeaders* response_headers,
+            const MetaData& request_headers,
+            MetaData* response_headers,
             Writer* fetched_content_writer,
             MessageHandler* message_handler,
             UrlAsyncFetcher::Callback* callback,
@@ -96,7 +95,6 @@ class SerfFetch {
         timer_(timer),
         str_url_(url),
         response_headers_(response_headers),
-        parser_(response_headers),
         fetched_content_writer_(fetched_content_writer),
         message_handler_(message_handler),
         callback_(callback),
@@ -266,13 +264,14 @@ class SerfFetch {
     while ((status = serf_bucket_read(headers, kBufferSize, &data, &num_bytes))
            == APR_SUCCESS || APR_STATUS_IS_EOF(status) ||
            APR_STATUS_IS_EAGAIN(status)) {
-      if (parser_.headers_complete()) {
+      if (response_headers_->headers_complete()) {
         status = APR_EGENERAL;
         message_handler_->Info(str_url_.c_str(), 0,
                                "headers complete but more data coming");
       } else {
         StringPiece str_piece(data, num_bytes);
-        apr_size_t parsed_len = parser_.ParseChunk(str_piece, message_handler_);
+        apr_size_t parsed_len =
+            response_headers_->ParseChunk(str_piece, message_handler_);
         if (parsed_len != num_bytes) {
           status = APR_EGENERAL;
           message_handler_->Error(str_url_.c_str(), 0,
@@ -283,7 +282,8 @@ class SerfFetch {
         break;
       }
     }
-    if (APR_STATUS_IS_EOF(status) && !parser_.headers_complete()) {
+    if (APR_STATUS_IS_EOF(status)
+        && !response_headers_->headers_complete()) {
       message_handler_->Error(str_url_.c_str(), 0,
                               "eof on incomplete headers code=%d %s",
                               status, GetAprErrorString(status).c_str());
@@ -399,9 +399,8 @@ class SerfFetch {
   SerfUrlAsyncFetcher* fetcher_;
   Timer* timer_;
   const std::string str_url_;
-  RequestHeaders request_headers_;
-  ResponseHeaders* response_headers_;
-  ResponseHeadersParser parser_;
+  SimpleMetaData request_headers_;
+  MetaData* response_headers_;
   Writer* fetched_content_writer_;
   MessageHandler* message_handler_;
   UrlAsyncFetcher::Callback* callback_;
@@ -705,8 +704,8 @@ void SerfUrlAsyncFetcher::CancelOutstandingFetches() {
 }
 
 bool SerfUrlAsyncFetcher::StreamingFetch(const std::string& url,
-                                         const RequestHeaders& request_headers,
-                                         ResponseHeaders* response_headers,
+                                         const MetaData& request_headers,
+                                         MetaData* response_headers,
                                          Writer* fetched_content_writer,
                                          MessageHandler* message_handler,
                                          UrlAsyncFetcher::Callback* callback) {

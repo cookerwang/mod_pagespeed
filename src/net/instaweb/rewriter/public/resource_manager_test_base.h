@@ -1,4 +1,4 @@
-/*
+/**
  * Copyright 2010 Google Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -22,36 +22,32 @@
 #define NET_INSTAWEB_REWRITER_PUBLIC_RESOURCE_MANAGER_TEST_BASE_H_
 
 #include "net/instaweb/htmlparse/public/html_parse_test_base.h"
-#include "net/instaweb/http/public/request_headers.h"
-#include "net/instaweb/http/public/response_headers.h"
 #include "net/instaweb/rewriter/public/domain_lawyer.h"
 #include "net/instaweb/rewriter/public/resource_manager.h"
 #include "net/instaweb/rewriter/public/resource_namer.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
-#include "net/instaweb/http/public/fake_url_async_fetcher.h"
+#include "net/instaweb/util/public/fake_url_async_fetcher.h"
 #include "net/instaweb/util/public/filename_encoder.h"
 #include "net/instaweb/util/public/file_system_lock_manager.h"
 #include "net/instaweb/util/public/hasher.h"
-#include "net/instaweb/http/public/http_cache.h"
+#include "net/instaweb/util/public/http_cache.h"
 #include "net/instaweb/util/public/lru_cache.h"
 #include "net/instaweb/util/public/mem_file_system.h"
 #include "net/instaweb/util/public/md5_hasher.h"
 #include "net/instaweb/util/public/mock_hasher.h"
 #include "net/instaweb/util/public/mock_timer.h"
-#include "net/instaweb/http/public/mock_url_fetcher.h"
+#include "net/instaweb/util/public/mock_url_fetcher.h"
 #include "net/instaweb/util/public/null_writer.h"
+#include "net/instaweb/util/public/simple_stats.h"
 #include "net/instaweb/util/public/stdio_file_system.h"
 #include <string>
-#include "net/instaweb/http/public/wait_url_async_fetcher.h"
+#include "net/instaweb/util/public/wait_url_async_fetcher.h"
 
 #define URL_PREFIX "http://www.example.com/"
 
 namespace net_instaweb {
 
 const int kCacheSize = 100 * 1000 * 1000;
-const char kTestDomain[] = "http://test.com/";
-
-class RewriteFilter;
 
 class ResourceManagerTestBase : public HtmlParseTestBaseNoAlloc {
  protected:
@@ -115,19 +111,11 @@ class ResourceManagerTestBase : public HtmlParseTestBaseNoAlloc {
     rewrite_driver_.AddFilters();
   }
 
-  // Add a single rewrite filter to other_rewrite_driver_.
+  // Add a single rewrite filter to rewrite_driver_.
   void AddOtherFilter(RewriteOptions::Filter filter) {
     other_options_.EnableFilter(filter);
     other_rewrite_driver_.AddFilters();
   }
-
-  // Add a custom rewrite filter (one without a corresponding option)
-  // to rewrite_driver and enable it.
-  void AddRewriteFilter(RewriteFilter* filter);
-
-  // Add a custom rewrite filter (one without a corresponding option)
-  // to other_rewrite_driver and enable it.
-  void AddOtherRewriteFilter(RewriteFilter* filter);
 
   // The async fetchers in these tests are really fake async fetchers, and
   // will call their callbacks directly.  Hence we don't really need
@@ -167,7 +155,7 @@ class ResourceManagerTestBase : public HtmlParseTestBaseNoAlloc {
   void AppendDefaultHeaders(const ContentType& content_type,
                             ResourceManager* resource_manager,
                             std::string* text) {
-    ResponseHeaders header;
+    SimpleMetaData header;
     int64 time = mock_timer()->NowUs();
     // Reset mock timer so synthetic headers match original.
     mock_timer()->set_time_us(0);
@@ -175,7 +163,7 @@ class ResourceManagerTestBase : public HtmlParseTestBaseNoAlloc {
     // Then set it back
     mock_timer()->set_time_us(time);
     StringWriter writer(text);
-    header.WriteAsHttp(&writer, &message_handler_);
+    header.Write(&writer, &message_handler_);
   }
 
   void ServeResourceFromManyContexts(const std::string& resource_url,
@@ -203,22 +191,21 @@ class ResourceManagerTestBase : public HtmlParseTestBaseNoAlloc {
   virtual HtmlParse* html_parse() { return rewrite_driver_.html_parse(); }
 
   // Initializes a resource for mock fetching.
-  void InitResponseHeaders(const StringPiece& resource_name,
+  void InitMetaData(const StringPiece& resource_name,
                     const ContentType& content_type,
                     const StringPiece& content,
                     int64 ttl) {
-    std::string name = StrCat(kTestDomain, resource_name);
-    ResponseHeaders response_headers;
+    std::string name = StrCat("http://test.com/", resource_name);
+    SimpleMetaData response_headers;
     resource_manager_->SetDefaultHeaders(&content_type, &response_headers);
     response_headers.RemoveAll(HttpAttributes::kCacheControl);
     response_headers.Add(
         HttpAttributes::kCacheControl,
         StringPrintf("public, max-age=%ld", static_cast<long>(ttl)).c_str());
-    response_headers.ComputeCaching();
     mock_url_fetcher_.SetResponse(name, response_headers, content);
   }
 
-  // TODO(sligocki): Take a ttl and share code with InitResponseHeaders.
+  // TODO(sligocki): Take a ttl and share code with InitMetaData.
   void AddFileToMockFetcher(const StringPiece& url,
                             const std::string& filename,
                             const ContentType& content_type) {
@@ -233,7 +220,7 @@ class ResourceManagerTestBase : public HtmlParseTestBaseNoAlloc {
                                            &message_handler_));
 
     // Put file into our fetcher.
-    ResponseHeaders default_header;
+    SimpleMetaData default_header;
     resource_manager_->SetDefaultHeaders(&content_type, &default_header);
     mock_url_fetcher_.SetResponse(url, default_header, contents);
   }
@@ -271,8 +258,7 @@ class ResourceManagerTestBase : public HtmlParseTestBaseNoAlloc {
 
   bool ServeResourceUrl(const StringPiece& url, std::string* content) {
     content->clear();
-    RequestHeaders request_headers;
-    ResponseHeaders response_headers;
+    SimpleMetaData request_headers, response_headers;
     StringWriter writer(content);
     FetchCallback callback;
     bool fetched = rewrite_driver_.FetchResource(

@@ -1,4 +1,4 @@
-/*
+/**
  * Copyright 2010 Google Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -52,9 +52,9 @@ class CacheExtenderTest : public ResourceManagerTestBase {
 
   void InitTest(int64 ttl) {
     AddFilter(RewriteOptions::kExtendCache);
-    InitResponseHeaders("a.css", kContentTypeCss, kCssData, ttl);
-    InitResponseHeaders("b.jpg", kContentTypeJpeg, kImageData, ttl);
-    InitResponseHeaders("c.js", kContentTypeJavascript, kJsData, ttl);
+    InitMetaData("a.css", kContentTypeCss, kCssData, ttl);
+    InitMetaData("b.jpg", kContentTypeJpeg, kImageData, ttl);
+    InitMetaData("c.js", kContentTypeJavascript, kJsData, ttl);
   }
 
   // Generate HTML loading 3 resources with the specified URLs

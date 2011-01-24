@@ -1,4 +1,4 @@
-/*
+/**
  * Copyright 2010 Google Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -21,7 +21,6 @@
 
 #include "base/basictypes.h"
 #include "net/instaweb/htmlparse/public/html_parser_types.h"
-#include "net/instaweb/util/public/arena.h"
 #include <string>
 #include "net/instaweb/util/public/string_util.h"
 
@@ -40,10 +39,6 @@ class HtmlNode {
   // to remove references to stale iterators, and to force IsRewritable to
   // return false.
   void MarkAsDead(const HtmlEventListIterator& end);
-
-  void* operator new(size_t size, Arena<HtmlNode>* arena) {
-    return arena->Allocate(size);
-  }
 
  protected:
   // TODO(jmarantz): jmaessen suggests instantiating the html nodes
@@ -125,7 +120,6 @@ class HtmlCharactersNode : public HtmlLeafNode {
  public:
   virtual ~HtmlCharactersNode();
   const std::string& contents() { return contents_; }
-  std::string* mutable_contents() { return &contents_; }
   void Append(const StringPiece& str) {
     contents_.append(str.data(), str.size());
   }

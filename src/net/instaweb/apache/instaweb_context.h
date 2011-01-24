@@ -44,6 +44,8 @@ class InstawebContext {
   enum ContentEncoding {kNone, kGzip, kDeflate, kOther};
   enum ContentDetectionState {kStart, kHtml, kNotHtml};
 
+  static const char kRepairHeadersFilterName[];
+
   InstawebContext(request_rec* request,
                   const ContentType& content_type,
                   net_instaweb::ApacheRewriteDriverFactory* factory,
@@ -90,6 +92,7 @@ class InstawebContext {
   scoped_ptr<GzipInflater> inflater_;
   scoped_ptr<RewriteDriver> custom_rewriter_;
   std::string buffer_;
+  SimpleMetaData response_headers_;
   ContentDetectionState content_detection_state_;
   std::string absolute_url_;
   RewriteOptions rewrite_options_;

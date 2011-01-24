@@ -1,4 +1,4 @@
-/*
+/**
  * Copyright 2010 Google Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,20 +14,16 @@
  * limitations under the License.
  */
 
-// Author: jmarantz@google.com (Joshua Marantz),
-//         morlovich@google.com (Maksim Orlovich)
+// Author: jmarantz@google.com (Joshua Marantz)
 
 #ifndef NET_INSTAWEB_UTIL_PUBLIC_SYMBOL_TABLE_H_
 #define NET_INSTAWEB_UTIL_PUBLIC_SYMBOL_TABLE_H_
 
-#include <cstdlib>
-#include <cstring>
+#include <stdlib.h>
+#include <set>
 #include "base/basictypes.h"
-
 #include "net/instaweb/util/public/atom.h"
-#include "net/instaweb/util/public/dense_hash_set.h"
 #include <string>
-#include "net/instaweb/util/public/string_hash.h"
 #include "net/instaweb/util/public/string_util.h"
 
 namespace net_instaweb {
@@ -50,49 +46,54 @@ namespace net_instaweb {
 // TODO(jmarantz): Symbol tables are not currently thread-safe.  We
 // should consider whether it's worth making them thread-safe, or
 // whether it's better to use separate symbol tables in each thread.
-template<class CharTransform> class SymbolTable {
+template<class SymbolCompare> class SymbolTable {
  public:
-  SymbolTable();
-  ~SymbolTable();
+  SymbolTable() { }
+  ~SymbolTable() {
+    while (!string_set_.empty()) {
+      // Note: This should perform OK for rb-trees, but will perform
+      // poorly if a hash-table is used.
+      typename SymbolSet::const_iterator p = string_set_.begin();
+      const char* str = *p;
+      string_set_.erase(p);
+      free(const_cast<char*>(str));
+    }
+  }
 
-  Atom Intern(const StringPiece& src);
+  Atom Intern(const char* src) {
+    Atom atom(src);
+    typename SymbolSet::const_iterator iter = string_set_.find(src);
+    if (iter == string_set_.end()) {
+      char* str = strdup(src);
+      string_set_.insert(str);
+      return Atom(str);
+    }
+    return Atom(*iter);
+  }
+
+  inline Atom Intern(const std::string& src) {
+    return Intern(src.c_str());
+  }
 
  private:
-  // StringPiece equality aware of CharTransform
-  struct Comparator {
-    bool operator()(const StringPiece& key_a, const StringPiece& key_b) const {
-      if (key_a.length() == key_b.length()) {
-        const char* a = key_a.data();
-        const char* b = key_b.data();
-        const char* a_end = a + key_a.length();
-        while (a < a_end) {
-          if (CharTransform::Normalize(*a) != CharTransform::Normalize(*b)) {
-            return false;
-          }
-          ++a;
-          ++b;
-        }
-        return true;
-      } else {
-        return false;
-      }
-    }
-  };
-
-  struct Hash {
-    std::size_t operator()(const StringPiece& key) const {
-      return HashString<CharTransform>(key.data(), key.length());
-    }
-  };
-
-  typedef dense_hash_set<StringPiece, Hash, Comparator> SymbolSet;
+  typedef std::set<const char*, SymbolCompare> SymbolSet;
   SymbolSet string_set_;
 
   DISALLOW_COPY_AND_ASSIGN(SymbolTable);
 };
 
-typedef SymbolTable<CaseFold> SymbolTableInsensitive;
-typedef SymbolTable<CasePreserve> SymbolTableSensitive;
+class SymbolTableInsensitive : public SymbolTable<CharStarCompareInsensitive> {
+ public:
+  SymbolTableInsensitive() { }
+ private:
+  DISALLOW_COPY_AND_ASSIGN(SymbolTableInsensitive);
+};
+class SymbolTableSensitive : public SymbolTable<CharStarCompareSensitive> {
+ public:
+  SymbolTableSensitive() { }
+ private:
+  DISALLOW_COPY_AND_ASSIGN(SymbolTableSensitive);
+};
 
 }  // namespace net_instaweb
 

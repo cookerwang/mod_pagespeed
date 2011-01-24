@@ -37,14 +37,12 @@
 // For now use wget when slurping additional files.
 
 #include "net/instaweb/apache/apache_rewrite_driver_factory.h"
-#include "net/instaweb/http/public/response_headers.h"
-#include "net/instaweb/http/public/request_headers.h"
-#include "net/instaweb/public/global_constants.h"
 #include "net/instaweb/util/public/message_handler.h"
 #include "net/instaweb/util/public/query_params.h"
+#include "net/instaweb/util/public/simple_meta_data.h"
 #include <string>
 #include "net/instaweb/util/public/string_writer.h"
-#include "net/instaweb/http/public/url_fetcher.h"
+#include "net/instaweb/util/public/url_fetcher.h"
 
 // The Apache headers must be after instaweb headers.  Otherwise, the
 // compiler will complain
@@ -79,7 +77,7 @@ void SlurpDefaultHandler(request_rec* r) {
 
 class ApacheWriter : public Writer {
  public:
-  ApacheWriter(request_rec* r, ResponseHeaders* response_headers,
+  ApacheWriter(request_rec* r, SimpleMetaData* response_headers,
                int64 flush_limit)
       : request_(r),
         response_headers_(response_headers),
@@ -136,7 +134,8 @@ class ApacheWriter : public Writer {
     }
     response_headers_->RemoveAll(HttpAttributes::kTransferEncoding);
     response_headers_->RemoveAll(HttpAttributes::kContentLength);
-    ResponseHeadersToApacheRequest(*response_headers_, request_);
+    MetaDataToApacheHeader(*response_headers_, request_->headers_out,
+                           &request_->status, &request_->proto_num);
     if (content_type != NULL) {
       ap_set_content_type(request_, content_type);
     }
@@ -148,7 +147,7 @@ class ApacheWriter : public Writer {
 
  private:
   request_rec* request_;
-  ResponseHeaders* response_headers_;
+  SimpleMetaData* response_headers_;
   int size_;
   int flush_limit_;
   bool headers_out_;
@@ -172,7 +171,7 @@ std::string RemoveModPageSpeedQueryParams(
   for (int i = 0; i < query_params.size(); ++i) {
     const char* name = query_params.name(i);
     static const char kModPagespeed[] = "ModPagespeed";
-    if (strncmp(name, kModPagespeed, STATIC_STRLEN(kModPagespeed)) == 0) {
+    if (strncmp(name, kModPagespeed, sizeof(kModPagespeed) - 1) == 0) {
       rewrite_query_params = true;
     } else {
       stripped_query_params.Add(name, query_params.value(i));
@@ -202,8 +201,8 @@ class ModPagespeedStrippingFetcher : public UrlFetcher {
  public:
   ModPagespeedStrippingFetcher(UrlFetcher* fetcher) : fetcher_(fetcher) {}
   virtual bool StreamingFetchUrl(const std::string& url,
-                                 const RequestHeaders& request_headers,
-                                 ResponseHeaders* response_headers,
+                                 const MetaData& request_headers,
+                                 MetaData* response_headers,
                                  Writer* fetched_content_writer,
                                  MessageHandler* message_handler) {
     std::string contents;
@@ -212,7 +211,7 @@ class ModPagespeedStrippingFetcher : public UrlFetcher {
         url, request_headers, response_headers, &writer, message_handler);
     if (fetched) {
       CharStarVector v;
-      if (response_headers->Lookup(kModPagespeedHeader, &v)) {
+      if (response_headers->Lookup("X-Mod-Pagespeed", &v)) {
         response_headers->Clear();
         std::string::size_type question = url.find('?');
         std::string url_pagespeed_off(url);
@@ -238,9 +237,8 @@ class ModPagespeedStrippingFetcher : public UrlFetcher {
 
 void SlurpUrl(const std::string& uri, ApacheRewriteDriverFactory* factory,
               request_rec* r) {
-  RequestHeaders request_headers;
-  ResponseHeaders response_headers;
-  ApacheRequestToRequestHeaders(*r, &request_headers);
+  SimpleMetaData request_headers, response_headers;
+  ApacheHeaderToMetaData(r->headers_in, 0, 0, &request_headers);
   std::string contents;
   ApacheWriter writer(r, &response_headers, factory->slurp_flush_limit());
 
